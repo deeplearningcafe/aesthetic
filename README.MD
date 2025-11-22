@@ -16,6 +16,9 @@ This repository provides a set of tools to help you create an aesthetic classifi
 
 The primary goal is to facilitate the creation of a labeled dataset and train a model that can predict aesthetic scores for new images. The tools are designed to be relatively self-contained.
 
+## Trained model
+An already trained model has been published on huggingface at [aipracticecafe/danbooru-aes-cls](https://huggingface.co/aipracticecafe/danbooru-aes-cls).
+
 ## Features
 
 *   **Data Filtering (`filtering.py`)**:
@@ -143,7 +146,7 @@ This process extracts deep features from images and caches them.
         --extract_batch_size 32 \
         --num_workers 4 \
         --device cuda \
-        --num_augmentations 1 
+        --num_augmentations 1
     ```
     *   `--json_path`: Path to the `.final.json` file from `labeling_app.py`.
     *   `--model_dir`: Directory containing SwinV2 `model.safetensors` and `config.json`.

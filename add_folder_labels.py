@@ -13,7 +13,7 @@ def is_image_file(path: Path) -> bool:
     return path.suffix.lower() in IMAGE_SUFFIXES
 
 def dirwalk(
-    path: Path, 
+    path: Path,
     condition: Optional[Callable] = None
 ) -> Generator[Path, None, None]:
     """Walk through directory and yield files that meet the condition."""
@@ -25,8 +25,8 @@ def dirwalk(
 
 
 def add_images_to_json(
-    image_dir_str: str, 
-    json_file_path_str: str, 
+    image_dir_str: str,
+    json_file_path_str: str,
     label: int = 3
 ):
     """
@@ -42,7 +42,7 @@ def add_images_to_json(
     """
     image_dir = Path(image_dir_str)
     json_file_path = Path(json_file_path_str)
-    
+
     global_base_path = Path(DEFAULT_GLOBAL_PATH)
 
     if not image_dir.is_dir():
@@ -64,27 +64,27 @@ def add_images_to_json(
                 f"Error reading '{json_file_path}': {e}. "
                 f"Starting with an empty dataset."
             )
-    
+
     images_added_count = 0
     # Assuming dirwalk and is_image_file are defined from your util code
     for image_path_obj in dirwalk(image_dir, is_image_file):
         try:
             # Resolve to an absolute path to handle various input forms
             absolute_image_path = image_path_obj.resolve()
-            
+
             # Calculate path relative to the global base path
             relative_path = absolute_image_path.relative_to(global_base_path)
-            
+
             # Format path string to use backslashes, matching example JSON
             relative_path_str = str(relative_path).replace('/', '\\')
-            
+
             data[relative_path_str] = label
             images_added_count += 1
-        except ValueError:
+        except ValueError as e:
             # This occurs if absolute_image_path is not under global_base_path
             print(
                 f"Warning: Image '{absolute_image_path}' is not under "
-                f"'{global_base_path}'. Skipping."
+                f"'{global_base_path}'. Skipping. {e}"
             )
         except Exception as e:
             print(

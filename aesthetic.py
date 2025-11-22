@@ -161,7 +161,7 @@ def resize_with_padding(
     """
     Resizes image while maintaining aspect ratio and padding to fill target size.
     Correctly handles BGR conversion expected by the model.
-    
+
     Args:
         image: Input image as numpy array (assumed RGB initially if from PIL)
         size: Target size as (height, width)
@@ -169,7 +169,7 @@ def resize_with_padding(
         resample: PIL resampling filter
         data_format: Output channel dimension format
         input_data_format: Input channel dimension format
-        
+
     Returns:
         Resized, padded, and BGR-converted image as numpy array
     """
@@ -220,22 +220,20 @@ def resize_with_padding(
 
     # Convert PIL image (RGB) to numpy array (float32)
     image_array = np.asarray(new_image_rgb, dtype=np.float32)
-    
-    # *** CHANGE START: Added BGR conversion ***
+
     # Convert RGB to BGR as expected by the model's original preprocessing
     image_array = image_array[:, :, ::-1]
-    # *** CHANGE END ***
 
     # Add channel dimension if needed (e.g., for grayscale - unlikely here)
     if image_array.ndim == 2:
         image_array = np.expand_dims(image_array, axis=-1)
-    
+
     # Convert to desired channel format (e.g., channels_first for PyTorch)
     # Input is now channels_last after numpy conversion and BGR swap
     image_array = to_channel_dimension_format(
         image_array, data_format, input_channel_dim=ChannelDimension.LAST
     )
-    
+
     # Restore original scale (0-1) if needed
     if do_rescale_back:
         image_array = image_array / 255.0
@@ -255,7 +253,7 @@ class ImagePathDataset(Dataset):
         json_path: str,
         processor_config: Dict,
         global_path: str=None,
-        num_augmentations: int = 1, 
+        num_augmentations: int = 1,
     ):
         self.json_path = json_path
         self.global_path = global_path
@@ -315,11 +313,11 @@ class ImagePathDataset(Dataset):
             v2.RandomErasing(p=0.2, scale=(0.02, 0.75), ratio=(0.5, 2)),
             ])
         else:
-            self.augmentation_transform = None 
+            self.augmentation_transform = None
 
 
     def preprocess_image(self, image):
-        
+
         image_array = np.array(image.convert("RGB"))
 
         # --- Preprocessing Pipeline ---
@@ -332,7 +330,7 @@ class ImagePathDataset(Dataset):
             resample=self.resample_filter,
             data_format=ChannelDimension.FIRST # PyTorch expects channels first
         )
-        
+
         # 2. Rescale values to [0,1] if they aren't already
         #    resize_with_padding handles rescaling back if input was 0-1,
         #    so here we ensure it's rescaled *from* 0-255 to 0-1 if needed.
@@ -342,15 +340,15 @@ class ImagePathDataset(Dataset):
                 scale=self.rescale_factor,
                 data_format=ChannelDimension.FIRST
             )
-        
+
         # 3. Normalize with mean and std
         processed_image = normalize(
-            processed_image, 
+            processed_image,
             mean=self.image_mean,
             std=self.image_std,
             data_format=ChannelDimension.FIRST
         )
-        
+
         # 4. Convert final processed numpy array to PyTorch tensor
         #    Add batch dimension and move to target device
         img_tensor = torch.tensor(processed_image).float()#.unsqueeze(0).to(device)
@@ -510,7 +508,7 @@ class FeatureDataset(Dataset):
         if idx >= len(self.image_keys):
             raise IndexError("Index out of range")
 
-        
+
         img_key = self.image_keys[idx]
         meta_info = self.sample_mapping.get(img_key)
 
@@ -574,8 +572,8 @@ def extract_and_cache_features(
     device: str = 'cpu',
     num_workers: int = 4,
     global_path: str=None,
-    h5_compression: Optional[str] = "gzip", 
-    num_augmentations: int = 1, 
+    h5_compression: Optional[str] = "gzip",
+    num_augmentations: int = 1,
 ) -> int:
     """
     Extracts features using a model and caches them efficiently into a single
@@ -906,7 +904,7 @@ def train_classifier(
     criterion = nn.CrossEntropyLoss(weight=weights_tensor)
     optimizer = optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, mode='max', factor=0.5, patience=3, verbose=True
+        optimizer, mode='max', factor=0.5, patience=3,
     )
 
     best_val_metric = -1.0 # Use F1 or Accuracy
@@ -1387,8 +1385,8 @@ if __name__ == "__main__":
     main()
 
     """
-    python aesthetic/aesthetic.py  --json_path aesthetic/aesthetic_labels_train.final.json --num_augmentations 2 --extract_batch_size 32 --epochs 100 --train_batch_size 1024 --use_mixup --dropout 0.3 --wd 0.1  --patience 50 --lr 1e-4
+    python aesthetic/aesthetic.py  --json_path aesthetic/aesthetic_labels_train.final_complete.json --num_augmentations 2 --extract_batch_size 32 --epochs 100 --train_batch_size 1024 --use_mixup --dropout 0.3 --wd 0.1  --patience 50 --lr 1e-4
     python aesthetic/aesthetic.py  --json_path aesthetic/aesthetic_labels_train.final.json --num_augmentations 1 --extract_batch_size 32 --epochs 100 --train_batch_size 2048 --use_mixup --dropout 0.3 --wd 0.1  --patience 50 --lr 1e-4
-    python aesthetic/aesthetic.py  --json_path aesthetic/aesthetic_labels_train.final.json --skip_extraction --train_batch_size 1024 --use_mixup --use_noise --dropout 0.3 --wd 1e-3  --num_augmentations 2 --patience 15 --lr 1e-4
-    python aesthetic/aesthetic.py  --json_path aesthetic/aesthetic_labels_train.final.json --skip_extraction --epochs 100 --train_batch_size 1024 --use_mixup --dropout 0.3 --wd 1e-3  --num_augmentations 2 --patience 50 --lr 1e-4
+    python aesthetic/aesthetic.py  --json_path aesthetic/aesthetic_labels_train.final_complete.json --skip_extraction --train_batch_size 1024 --use_mixup --use_noise --dropout 0.3 --wd 1e-3  --num_augmentations 2 --patience 15 --lr 1e-4
+    python aesthetic/aesthetic.py  --json_path aesthetic/aesthetic_labels_train.final_complete.json --skip_extraction --epochs 100 --train_batch_size 1024 --use_mixup --dropout 0.3 --wd 1e-3  --num_augmentations 2 --patience 50 --lr 1e-4
     """
