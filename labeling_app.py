@@ -5,6 +5,11 @@ from pathlib import Path
 from typing import Callable, Generator, Optional
 import time
 import csv
+import pandas as pd
+import numpy as np
+import yaml
+import re
+
 
 def dirwalk(path: Path, cond: Optional[Callable] = None) -> Generator[Path, None, None]:
     for p in path.iterdir():
@@ -16,22 +21,22 @@ def dirwalk(path: Path, cond: Optional[Callable] = None) -> Generator[Path, None
                     continue
             yield p
 
+
 class ImageLabeler:
     def __init__(self, images_folder, output_file="labels.csv"):
         """Initialize the image labeler with the folder path and output file."""
         self.images_folder = Path(images_folder)
         self.output_csv_file = output_file
-        self.output_json_file = Path(output_file).with_suffix('.json')
+        self.output_json_file = Path(output_file).with_suffix(".json")
         self.images = self._get_all_images()
         self.labels = {}
         self.current_index = 0
-        # Optimization: Check if images list is empty early
         if not self.images:
             print("Warning: No images found. Labeling cannot proceed.")
             return
 
         self._load_existing_labels()
-        
+
     def _get_all_images(self):
         """
         Get all image paths from the specified folder and its subfolders.
@@ -39,134 +44,101 @@ class ImageLabeler:
         where class_id is 0, 1, 2, or 3.
         """
         from pathlib import Path
-        
-        image_extensions = {'.jpg', '.jpeg', '.png', '.webp', '.gif'}
+
+        image_extensions = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
         all_images = []
-        
+
         # Check if path exists and is a directory
         base_path = Path(self.images_folder)
         if not base_path.exists() or not base_path.is_dir():
             print(f"Warning: {self.images_folder} is not a valid directory")
             return []
-        
-        # Define condition for image files
+
         def is_valid_image(path):
             return path.is_file() and path.suffix.lower() in image_extensions
-        
-        # Walk through all directories and collect image paths
+
         for image_path in dirwalk(base_path, is_valid_image):
             all_images.append(str(image_path))
-        
-        # Sort images to ensure consistent ordering between runs
+
         all_images.sort()
-        
-        # Print summary of found images
+
         if all_images:
             class_counts = {}
             for img_path in all_images:
-                # Extract class from path (assuming path format: base_dir/class_id/image)
+                # Extract class from path
                 try:
                     path_parts = Path(img_path).parts
-                    class_folder = path_parts[-2]  # Second-to-last part is class folder
-                    if class_folder in ['0', '1', '2', '3']:
-                        class_counts[class_folder] = class_counts.get(class_folder, 0) + 1
+                    class_folder = path_parts[-2]
+                    if class_folder in ["0", "1", "2", "3"]:
+                        class_counts[class_folder] = (
+                            class_counts.get(class_folder, 0) + 1
+                        )
                 except IndexError:
                     pass
-                    
+
             print(f"Found {len(all_images)} images across class folders:")
             for class_id, count in sorted(class_counts.items()):
                 print(f"  Class {class_id}: {count} images")
         else:
             print(f"No images found in {self.images_folder} or its subfolders")
-        
+
         return all_images
-        
-    # def _load_existing_labels(self):
-    #     """Load existing labels and set current index to continue from last labeled."""
-    #     if os.path.exists(self.output_file):
-    #         try:
-    #             with open(self.output_file, 'r') as f:
-    #                 self.labels = json.load(f)
-                    
-    #             # Find the highest index of labeled images to resume from there
-    #             labeled_indices = []
-    #             for labeled_path in self.labels:
-    #                 if labeled_path in self.images:
-    #                     labeled_index = self.images.index(labeled_path)
-    #                     labeled_indices.append(labeled_index)
-                
-    #             if labeled_indices:
-    #                 # Start from the image after the last labeled one
-    #                 self.current_index = max(labeled_indices) + 1
-    #                 # Handle case where we finished labeling all images
-    #                 if self.current_index >= len(self.images):
-    #                     self.current_index = 0
-    #         except json.JSONDecodeError:
-    #             self.labels = {}
+
     def _load_existing_labels(self):
         """Load existing labels from CSV and set index to continue."""
         if os.path.exists(self.output_csv_file):
             try:
-                with open(self.output_csv_file, 'r', newline='',
-                          encoding='utf-8') as f:
+                with open(self.output_csv_file, "r", newline="", encoding="utf-8") as f:
                     reader = csv.reader(f)
-                    header = next(reader) # Skip header
-                    if header != ['image_path', 'label']:
+                    header = next(reader)
+                    if header != ["image_path", "label"]:
                         print(f"Warning: Unexpected CSV header: {header}")
-                        # Attempt to load anyway assuming column order
-                    
+
                     for row in reader:
                         if len(row) == 2:
                             image_path, label_str = row
                             if image_path in self.images:
                                 try:
-                                    # Convert label back to integer
                                     self.labels[image_path] = int(label_str)
                                 except ValueError:
-                                    print(f"Warning: Invalid label '{label_str}'"
-                                          f" for {image_path}. Skipping.")
+                                    print(
+                                        f"Warning: Invalid label '{label_str}'"
+                                        f" for {image_path}. Skipping."
+                                    )
                         else:
                             print(f"Warning: Skipping malformed row: {row}")
 
                 # Find the highest index of labeled images to resume
                 labeled_indices = []
                 for labeled_path in self.labels:
-                    # Check if the labeled path is still in the current list
                     if labeled_path in self.images:
                         try:
                             labeled_index = self.images.index(labeled_path)
                             labeled_indices.append(labeled_index)
                         except ValueError:
-                             # Image path from labels file not found in current scan
-                             pass 
+                            pass
 
                 if labeled_indices:
                     self.current_index = max(labeled_indices) + 1
                     if self.current_index >= len(self.images):
-                        # All images were labeled previously
-                        self.current_index = 0 
-                        print("All images appear to be labeled based on "
-                              "the CSV file.")
+                        self.current_index = 0
+                        print("All images appear to be labeled based on the CSV file.")
                     else:
-                         print(f"Resuming labeling from index "
-                               f"{self.current_index}")
+                        print(f"Resuming labeling from index {self.current_index}")
                 else:
-                    print("No previously labeled images found in CSV or "
-                          "paths differ.")
+                    print("No previously labeled images found in CSV or paths differ.")
                     self.current_index = 0
 
             except FileNotFoundError:
                 print("CSV file not found. Starting fresh.")
                 self.labels = {}
                 self.current_index = 0
-            except StopIteration: # Handles empty file or only header
-                print("CSV file is empty or contains only header. "
-                      "Starting fresh.")
+            except StopIteration:
+                print("CSV file is empty or contains only header. Starting fresh.")
                 self.labels = {}
                 self.current_index = 0
             except Exception as e:
-                print(f"Error loading labels from CSV: {e}. "
-                      "Starting fresh.")
+                print(f"Error loading labels from CSV: {e}. Starting fresh.")
                 self.labels = {}
                 self.current_index = 0
         else:
@@ -174,154 +146,376 @@ class ImageLabeler:
             self.labels = {}
             self.current_index = 0
 
-
-    # def _save_labels(self):
-        # """Save the current labels to the output file."""
-        # with open(self.output_file, 'w') as f:
-        #     json.dump(self.labels, f, indent=2)
     def _save_label(self, image_path, score):
         """Append the current label to the CSV output file."""
         file_exists = os.path.exists(self.output_csv_file)
         try:
-            with open(self.output_csv_file, 'a', newline='',
-                      encoding='utf-8') as f:
+            with open(self.output_csv_file, "a", newline="", encoding="utf-8") as f:
                 writer = csv.writer(f)
-                # Write header only if file is new/empty
                 if not file_exists or os.path.getsize(self.output_csv_file) == 0:
-                    writer.writerow(['image_path', 'label'])
+                    writer.writerow(["image_path", "label"])
                 writer.writerow([image_path, score])
         except IOError as e:
             print(f"Error saving label to CSV: {e}")
-
 
     def get_current_image(self):
         """Get the current image path based on index, skipping already labeled images."""
         if not self.images:
             return None
-            
+
         # Find the next unlabeled image
         start_index = self.current_index
         while True:
             current_image = self.images[self.current_index]
             if current_image not in self.labels:
                 return current_image
-                
-            # Move to the next image
+
             self.current_index = (self.current_index + 1) % len(self.images)
-            
-            # If we've checked all images and come back to where we started, 
-            # then all images are labeled
+
             if self.current_index == start_index:
-            #     return self.images[self.current_index]  # Return current even if labeled
                 return None
-            
+
     def label_image(self, score):
         """Label the current image, save to CSV, and move to the next."""
-        # Check if there are images and if current_index is valid
         if not self.images or self.current_index >= len(self.images):
-             # Handle cases where get_current_image might return None
-             # or index is out of bounds after loading
-            progress = f"Finished or no images left. " \
-                       f"({len(self.labels)} labeled)"
+            progress = f"Finished or no images left. ({len(self.labels)} labeled)"
             return None, progress, len(self.labels)
 
         current_image = self.images[self.current_index]
-        # if current_image:
-        #     self.labels[current_image] = score
-        #     self._save_labels()
-        
-        # # Move to the next image, skipping already labeled ones
-        # self.current_index = (self.current_index + 1) % len(self.images)
-        # next_image = self.get_current_image()
-        
-        # # Calculate progress based on total labels saved
-        # total_labeled = len(self.labels)
-        # progress = f"Image {self.current_index + 1}/{len(self.images)} " \
-        #            f"({total_labeled} labeled)"
-                   
-        # return next_image, progress, total_labeled
-        # Only proceed if the image hasn't been labeled already in this session
-        # (get_current_image should skip already labeled ones based on loaded data)
+
         if current_image and current_image not in self.labels:
             self.labels[current_image] = score
-            # Save this single label immediately
             self._save_label(current_image, score)
 
-            # Move to the next *potential* index. get_current_image will handle skips.
             self.current_index = (self.current_index + 1) % len(self.images)
             next_image = self.get_current_image()
 
-            # Calculate progress based on total labels saved (in memory count)
             total_labeled = len(self.labels)
-            progress = f"Image {self.current_index + 1}/{len(self.images)} " \
-                       f"({total_labeled} labeled)"
+            progress = (
+                f"Image {self.current_index + 1}/{len(self.images)} "
+                f"({total_labeled} labeled)"
+            )
 
             return next_image, progress, total_labeled
         elif current_image in self.labels:
-            # This case might happen if logic allows revisiting, but
-            # get_current_image should prevent it. Log if it occurs.
-            print(f"Warning: Attempted to re-label already labeled image: "
-                  f"{current_image}")
-            # Move to next without saving
+            print(
+                f"Warning: Attempted to re-label already labeled image: {current_image}"
+            )
             self.current_index = (self.current_index + 1) % len(self.images)
             next_image = self.get_current_image()
             total_labeled = len(self.labels)
-            progress = f"Image {self.current_index + 1}/{len(self.images)} " \
-                       f"({total_labeled} labeled)"
+            progress = (
+                f"Image {self.current_index + 1}/{len(self.images)} "
+                f"({total_labeled} labeled)"
+            )
             return next_image, progress, total_labeled
-        else: # current_image is None (shouldn't happen if get_current_image works)
+        else:
             progress = f"Finished labeling. ({len(self.labels)} labeled)"
             return None, progress, len(self.labels)
 
 
+class PairImageLabeler:
+    def __init__(
+        self,
+        images_folder,
+        final_tiers_csv,
+        prior_knowledge_csv,
+        output_file="labels_pairs.json",
+        config_path="configs/config.yaml",
+        artists_count=64,
+        characters_count=32,
+    ):
+        self.images_folder = Path(images_folder)
+        self.output_file = output_file
+        self.config_path = config_path
+        self.labels = {}
+        self.pairs = []
+        self.current_index = 0
+        self.id_to_tier = {}
+        self.artists_count = artists_count
+        self.characters_count = characters_count
 
-def create_app(images_folder="./images", output_file="labels.json"):
+        self._load_existing_labels()
+        self._generate_pairs(final_tiers_csv, prior_knowledge_csv)
+        self._sync_index()
+
+    def _load_existing_labels(self):
+        if os.path.exists(self.output_file):
+            try:
+                with open(self.output_file, "r", encoding="utf-8") as f:
+                    self.labels = json.load(f)
+            except Exception:
+                self.labels = {}
+
+    def _generate_pairs(self, final_tiers_csv, prior_knowledge_csv):
+        image_extensions = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
+        all_images = []
+        for p in dirwalk(
+            self.images_folder,
+            lambda p: p.is_file() and p.suffix.lower() in image_extensions,
+        ):
+            all_images.append(str(p))
+
+        id_to_path = {}
+        for p in all_images:
+            try:
+                img_id = int(Path(p).stem)
+                id_to_path[img_id] = p
+            except ValueError:
+                pass
+
+        if not id_to_path or not final_tiers_csv or not prior_knowledge_csv:
+            print("Missing images or CSV files for pair generation.")
+            return
+
+        try:
+            df_tiers = pd.read_csv(final_tiers_csv)
+            df_prior = pd.read_csv(prior_knowledge_csv, low_memory=False)
+        except Exception as e:
+            print(f"Error loading CSVs for pairs: {e}")
+            return
+
+        # Merge and filter to available images
+        df = pd.merge(df_prior, df_tiers, on="id", how="inner")
+        df = df[df["id"].isin(id_to_path.keys())].copy()
+
+        self.id_to_tier = dict(zip(df["id"], df["final_tier"]))
+
+        df["parent_group"] = df["parent_id"].fillna(df["id"])
+        df = df.drop_duplicates(subset=["parent_group"])
+
+        target_artists = []
+        target_chars = []
+        if os.path.exists(self.config_path):
+            try:
+                with open(self.config_path, "r") as f:
+                    config = yaml.safe_load(f)
+                target_artists = config.get("sampling", {}).get("artist_list", [])
+                target_chars = config.get("sampling", {}).get("character_list", [])
+                print(f"Loaded {len(target_artists)} artists and {len(target_chars)}.")
+                print(
+                    f"So final dataset is {len(target_artists) * self.artists_count + len(target_chars) * self.characters_count}"
+                )
+            except Exception as e:
+                print(f"Error loading config for pairs: {e}")
+
+        sampled_ids = set()
+        rng = np.random.RandomState(42)
+
+        def sample_group(group_df, target_n):
+            if group_df.empty or target_n == 0:
+                return []
+            n_mp = target_n // 2
+            n_gs = target_n - n_mp
+
+            mp_df = group_df[group_df["final_tier"] == "masterpiece"]
+            gs_df = group_df[group_df["final_tier"] == "good_score"]
+            bs_df = group_df[group_df["final_tier"] == "bad_score"]
+
+            n_mp = target_n // 2
+            n_gs = target_n - n_mp
+            n_bs = 0
+
+            # if target tiers are short
+            if len(mp_df) < n_mp:
+                n_gs += n_mp - len(mp_df)
+                n_mp = len(mp_df)
+
+            if len(gs_df) < n_gs:
+                shortfall = n_gs - len(gs_df)
+                n_gs = len(gs_df)
+
+                # excess to masterpiece
+                mp_excess = len(mp_df) - n_mp
+                if mp_excess > 0:
+                    absorbed = min(shortfall, mp_excess)
+                    n_mp += absorbed
+                    shortfall -= absorbed
+
+                n_bs += shortfall
+
+            sampled = []
+            if n_mp > 0 and not mp_df.empty:
+                sampled.extend(
+                    mp_df.sample(min(n_mp, len(mp_df)), random_state=rng)["id"].tolist()
+                )
+            if n_gs > 0 and not gs_df.empty:
+                sampled.extend(
+                    gs_df.sample(min(n_gs, len(gs_df)), random_state=rng)["id"].tolist()
+                )
+            if n_bs > 0 and not bs_df.empty:
+                sampled.extend(
+                    bs_df.sample(min(n_bs, len(bs_df)), random_state=rng)["id"].tolist()
+                )
+
+            if len(sampled) < target_n:
+                remaining = target_n - len(sampled)
+                leftover_df = group_df[~group_df["id"].isin(sampled)]
+                if not leftover_df.empty:
+                    sampled.extend(
+                        leftover_df.sample(
+                            min(remaining, len(leftover_df)), random_state=rng
+                        )["id"].tolist()
+                    )
+
+            remaining_needed = target_n - len(sampled)
+            if remaining_needed > 0:
+                print(f"Remaining tags {remaining_needed}")
+
+            return sampled
+
+        # Artists Sampling
+        if "tag_string_artist" in df.columns and target_artists:
+            escaped_artists = [re.escape(t) for t in target_artists]
+            artist_pattern = r"(?:^|\s)(?:" + "|".join(escaped_artists) + r")(?:$|\s)"
+
+            is_artist_mask = df["tag_string_artist"].str.contains(
+                artist_pattern, regex=True, na=False
+            )
+
+            df_artists = df[is_artist_mask].copy()
+            df_artists["artist_tag"] = (
+                df_artists["tag_string_artist"].fillna("").str.split(" ")
+            )
+            df_artists = df_artists.explode("artist_tag")
+
+            df_artists = df_artists[df_artists["artist_tag"].isin(target_artists)]
+
+            found_artists = 0
+            for artist, group in df_artists.groupby("artist_tag"):
+                group = group[~group["id"].isin(sampled_ids)]
+                s_ids = sample_group(group, self.artists_count)
+                sampled_ids.update(s_ids)
+                found_artists += 1
+            print(f"Created groups for {found_artists}")
+
+        # Characters Sampling
+        if "tag_string_character" in df.columns and target_chars:
+            escaped_chars = [re.escape(t) for t in target_chars]
+            char_pattern = r"(?:^|\s)(?:" + "|".join(escaped_chars) + r")(?:$|\s)"
+
+            is_char_mask = df["tag_string_character"].str.contains(
+                char_pattern, regex=True, na=False
+            )
+
+            df_chars = df[is_char_mask].copy()
+            df_chars["char_tag"] = (
+                df_chars["tag_string_character"].fillna("").str.split(" ")
+            )
+            df_chars = df_chars.explode("char_tag")
+
+            df_chars = df_chars[df_chars["char_tag"].isin(target_chars)]
+
+            found_chars = 0
+            for char, group in df_chars.groupby("char_tag"):
+                group = group[~group["id"].isin(sampled_ids)]
+                s_ids = sample_group(group, self.characters_count)
+                sampled_ids.update(s_ids)
+                found_chars += 1
+            print(f"Created groups for {found_chars}")
+
+        sampled_list = list(sampled_ids)
+        rng.shuffle(sampled_list)
+
+        for i in range(0, len(sampled_list) - 1, 2):
+            p1 = id_to_path[sampled_list[i]]
+            p2 = id_to_path[sampled_list[i + 1]]
+            self.pairs.append((p1, p2))
+
+        print(f"Generated {len(self.pairs)} pairs for labeling.")
+
+    def _sync_index(self):
+        self.current_index = 0
+        for i, pair in enumerate(self.pairs):
+            pair_key = f"{pair[0]}|{pair[1]}"
+            if pair_key not in self.labels:
+                self.current_index = i
+                break
+
+    def get_current_pair(self):
+        if self.current_index >= len(self.pairs):
+            return None, None
+        return self.pairs[self.current_index]
+
+    def label_pair(self, winner_idx):
+        if self.current_index >= len(self.pairs):
+            return (
+                None,
+                None,
+                f"Finished! ({len(self.labels)} labeled)",
+                len(self.labels),
+            )
+
+        left_path, right_path = self.pairs[self.current_index]
+        pair_key = f"{left_path}|{right_path}"
+
+        winner_path = left_path if winner_idx == 0 else right_path
+        winner_id = int(Path(winner_path).stem)
+        selected_tier = self.id_to_tier.get(winner_id, "unknown")
+
+        self.labels[pair_key] = {
+            "winner": winner_idx,
+            "left_path": left_path,
+            "right_path": right_path,
+            "selected_tier": selected_tier,
+        }
+
+        with open(self.output_file, "w", encoding="utf-8") as f:
+            json.dump(self.labels, f, indent=2)
+
+        self.current_index += 1
+        next_left, next_right = self.get_current_pair()
+        progress = f"Pair {self.current_index + 1}/{len(self.pairs)} ({len(self.labels)} labeled)"
+        return next_left, next_right, progress, len(self.labels)
+
+
+def create_app(
+    images_folder="./images",
+    output_file="labels.csv",
+    final_tiers_csv=None,
+    prior_knowledge_csv=None,
+    pairs_output="labels_pairs.json",
+    config_path="configs/config.yaml",
+):
     """Create and launch the Gradio interface for image labeling."""
     labeler = ImageLabeler(images_folder, output_file)
-    
-    if not labeler.images:
+    pair_labeler = PairImageLabeler(
+        images_folder, final_tiers_csv, prior_knowledge_csv, pairs_output, config_path
+    )
+
+    if not labeler.images and not pair_labeler.pairs:
         print(f"No images found in {images_folder}")
         return
-    
-    # def label_callback(score, event=None):
-    #     """Callback for labeling images."""
-    #     return labeler.label_image(score)
-    
-        # --- State variables for timing and session stats ---
-    # Using gr.State to maintain values between interactions
+
     initial_image = labeler.get_current_image()
-    initial_progress = f"Image {labeler.current_index + 1}/{len(labeler.images)} " \
-                       f"({len(labeler.labels)} labeled)"
+    initial_progress = (
+        f"Image {labeler.current_index + 1}/{len(labeler.images)} "
+        f"({len(labeler.labels)} labeled)"
+    )
 
     def format_time(seconds):
         """Helper to format seconds into H:M:S"""
-        if seconds < 0: seconds = 0
+        if seconds < 0:
+            seconds = 0
         m, s = divmod(seconds, 60)
         h, m = divmod(m, 60)
         return f"{int(h):02d}:{int(m):02d}:{int(s):02d}"
 
-    # --- Updated label_callback function ---
-    def label_callback(score, current_start_time, session_start_time,
-                       total_session_time, count_session):
-        """
-        Callback for labeling images. Calculates time, updates stats,
-        and returns new values for UI components and state.
-        """
-        # 1. Calculate time spent on the *current* image
+    def label_callback(
+        score, current_start_time, session_start_time, total_session_time, count_session
+    ):
         end_time = time.time()
         time_spent_on_image = end_time - current_start_time
 
-        # 2. Call the labeler's core logic
         next_image, base_progress, total_labeled_count = labeler.label_image(score)
 
-        # 3. Update session stats
         new_count_session = count_session + 1
         new_total_session_time = total_session_time + time_spent_on_image
-        avg_time_session = (new_total_session_time / new_count_session
-                            if new_count_session > 0 else 0)
+        avg_time_session = (
+            new_total_session_time / new_count_session if new_count_session > 0 else 0
+        )
         total_elapsed_session = time.time() - session_start_time
 
-        # 4. Prepare display strings
         timer_str = f"Last: {time_spent_on_image:.2f}s"
         avg_time_str = f"Avg: {avg_time_session:.2f}s"
         session_stats_str = (
@@ -330,146 +524,202 @@ def create_app(images_folder="./images", output_file="labels.json"):
             f"Total Time: {format_time(total_elapsed_session)}"
         )
 
-        # 5. Get the start time for the *next* image
         next_image_start_time = time.time()
 
-        # 6. Handle completion
         if next_image is None:
             base_progress = f"All {len(labeler.images)} images labeled!"
-            timer_str = "" # No next image timer
-            # Keep avg time display consistent
+            timer_str = ""
 
         return (
-            next_image,               # Output for image_display
-            base_progress,            # Output for progress_text
-            timer_str,                # Output for timer_text
-            avg_time_str,             # Output for avg_time_text
-            session_stats_str,        # Output for session_stats_display
-            next_image_start_time,    # Output for image_start_time state
-            new_total_session_time,   # Output for total_labeling_time state
-            new_count_session         # Output for images_labeled_session state
+            next_image,
+            base_progress,
+            timer_str,
+            avg_time_str,
+            session_stats_str,
+            next_image_start_time,
+            new_total_session_time,
+            new_count_session,
         )
 
-
-    with gr.Blocks(title="Aesthetic Labeler") as app: # Added title
+    with gr.Blocks(title="Aesthetic Labeler") as app:
         gr.Markdown("# Anime Image Aesthetic Labeler")
 
-        # --- State Initialization ---
-        # Stores the timestamp when the current image was displayed
         image_start_time = gr.State(value=time.time())
-        # Stores the total time spent actively labeling in this session
         total_labeling_time = gr.State(0.0)
-        # Stores the number of images labeled in this session
         images_labeled_session = gr.State(0)
-        # Stores the timestamp when the app session started
         session_start_time = gr.State(value=time.time())
 
-        # --- UI Layout ---
-        with gr.Row():
-            image_display = gr.Image(
-                label="Current Image",
-                value=initial_image,
-                show_download_button=False,
-                height=512,
-                # Optimization: Set interactive=False as it's display only
-                interactive=False
-            )
+        with gr.Tabs():
+            with gr.Tab("Single Labeling"):
+                with gr.Row():
+                    image_display = gr.Image(
+                        label="Current Image",
+                        value=initial_image,
+                        show_download_button=False,
+                        height=512,
+                        interactive=False,
+                    )
 
-        # Row for Progress and Timing Info
-        with gr.Row():
-            progress_text = gr.Textbox(
-                label="Progress",
-                value=initial_progress,
-                interactive=False,
-                scale=3 # Give progress more space
-            )
-            timer_text = gr.Textbox(
-                label="Image Time",
-                value="Last: 0.00s", # Initial value
-                interactive=False,
-                scale=1 # Smaller space for timer
-            )
-            avg_time_text = gr.Textbox(
-                label="Session Avg",
-                value="Avg: 0.00s", # Initial value
-                interactive=False,
-                scale=1 # Smaller space for average
-            )
+                with gr.Row():
+                    progress_text = gr.Textbox(
+                        label="Progress",
+                        value=initial_progress,
+                        interactive=False,
+                        scale=3,
+                    )
+                    timer_text = gr.Textbox(
+                        label="Image Time",
+                        value="Last: 0.00s",
+                        interactive=False,
+                        scale=1,
+                    )
+                    avg_time_text = gr.Textbox(
+                        label="Session Avg",
+                        value="Avg: 0.00s",
+                        interactive=False,
+                        scale=1,
+                    )
 
-        # Row for Labeling Buttons
-        with gr.Row():
-            # Using numeric values directly for clarity with keyboard shortcuts
-            btn_worst = gr.Button("Worst (1)", variant="stop", scale=1)
-            btn_worse = gr.Button("Worse (2)", variant="secondary", scale=1)
-            btn_better = gr.Button("Better (3)", variant="secondary", scale=1)
-            btn_best = gr.Button("Best (4)", variant="success", scale=1)
+                with gr.Row():
+                    btn_worst = gr.Button(
+                        "Worst (1)", variant="stop", scale=1, elem_id="btn_worst"
+                    )
+                    btn_worse = gr.Button(
+                        "Worse (2)", variant="secondary", scale=1, elem_id="btn_worse"
+                    )
+                    btn_better = gr.Button(
+                        "Better (3)", variant="secondary", scale=1, elem_id="btn_better"
+                    )
+                    btn_best = gr.Button(
+                        "Best (4)", variant="success", scale=1, elem_id="btn_best"
+                    )
 
-        # Display for Session Statistics at the bottom
-        session_stats_display = gr.Textbox(
-            label="Session Summary",
-            value="Session Stats: Labeled: 0 | Avg Time: 0.00s | Total Time: 00:00:00",
-            interactive=False
-        )
+                session_stats_display = gr.Textbox(
+                    label="Session Summary",
+                    value="Session Stats: Labeled: 0 | Avg Time: 0.00s | Total Time: 00:00:00",
+                    interactive=False,
+                )
 
-        # --- Button Click Events ---
-        # Define outputs including the state variables to be updated
-        outputs = [
-            image_display,
-            progress_text,
-            timer_text,
-            avg_time_text,
-            session_stats_display,
-            image_start_time, # Pass back the new start time
-            total_labeling_time, # Pass back updated total time
-            images_labeled_session # Pass back updated count
-        ]
-        # Define inputs including the current state values needed for calculation
-        inputs = [
-            image_start_time,
-            session_start_time,
-            total_labeling_time,
-            images_labeled_session
-        ]
+                outputs = [
+                    image_display,
+                    progress_text,
+                    timer_text,
+                    avg_time_text,
+                    session_stats_display,
+                    image_start_time,
+                    total_labeling_time,
+                    images_labeled_session,
+                ]
+                inputs = [
+                    image_start_time,
+                    session_start_time,
+                    total_labeling_time,
+                    images_labeled_session,
+                ]
 
-        btn_worst.click(lambda *state: label_callback(0, *state),
-                        inputs=inputs, outputs=outputs)
-        btn_worse.click(lambda *state: label_callback(1, *state),
-                        inputs=inputs, outputs=outputs)
-        btn_better.click(lambda *state: label_callback(2, *state),
-                         inputs=inputs, outputs=outputs)
-        btn_best.click(lambda *state: label_callback(3, *state),
-                       inputs=inputs, outputs=outputs)
+                btn_worst.click(
+                    lambda *state: label_callback(0, *state),
+                    inputs=inputs,
+                    outputs=outputs,
+                )
+                btn_worse.click(
+                    lambda *state: label_callback(1, *state),
+                    inputs=inputs,
+                    outputs=outputs,
+                )
+                btn_better.click(
+                    lambda *state: label_callback(2, *state),
+                    inputs=inputs,
+                    outputs=outputs,
+                )
+                btn_best.click(
+                    lambda *state: label_callback(3, *state),
+                    inputs=inputs,
+                    outputs=outputs,
+                )
+
+            with gr.Tab("Pair Labeling (Elo)"):
+                initial_left, initial_right = pair_labeler.get_current_pair()
+                initial_pair_progress = f"Pair {pair_labeler.current_index + 1}/{len(pair_labeler.pairs)} ({len(pair_labeler.labels)} labeled)"
+
+                with gr.Row():
+                    image_left = gr.Image(
+                        label="Image 1 (Left)",
+                        value=initial_left,
+                        interactive=False,
+                        height=512,
+                    )
+                    image_right = gr.Image(
+                        label="Image 2 (Right)",
+                        value=initial_right,
+                        interactive=False,
+                        height=512,
+                    )
+
+                with gr.Row():
+                    progress_text_pairs = gr.Textbox(
+                        label="Progress", value=initial_pair_progress, interactive=False
+                    )
+
+                with gr.Row():
+                    btn_left = gr.Button(
+                        "Left is Better (A)", variant="primary", elem_id="btn_left"
+                    )
+                    btn_right = gr.Button(
+                        "Right is Better (D)", variant="primary", elem_id="btn_right"
+                    )
+
+                def pair_label_callback(winner_idx):
+                    next_left, next_right, progress, _ = pair_labeler.label_pair(
+                        winner_idx
+                    )
+                    return next_left, next_right, progress
+
+                btn_left.click(
+                    lambda: pair_label_callback(0),
+                    outputs=[image_left, image_right, progress_text_pairs],
+                )
+                btn_right.click(
+                    lambda: pair_label_callback(1),
+                    outputs=[image_left, image_right, progress_text_pairs],
+                )
 
         # --- Keyboard Shortcuts ---
-        # Kept the existing robust JS implementation
-        app.load(None, js="""
+        app.load(
+            None,
+            js="""
             function label_keydown(e) {
-                // Only trigger if no input elements are focused
                 if (document.activeElement.tagName === 'INPUT' ||
                     document.activeElement.tagName === 'TEXTAREA') {
                     return;
                 }
-                // Prevent default actions for number keys 1-4
+
+                // Single Labeling Shortcuts
                 if (['1', '2', '3', '4'].includes(e.key)) {
                     e.preventDefault();
-                    // Find buttons more reliably using data-testid or class
-                    const buttons = document.querySelectorAll(
-                        'button.gradio-button'
-                    );
-                    // Assuming the order is Worst, Worse, Better, Best
-                    const buttonMap = {'1': 0, '2': 1, '3': 2, '4': 3};
-                    if (e.key in buttonMap && buttons.length > buttonMap[e.key]) {
-                        buttons[buttonMap[e.key]].click();
+                    const btnIds =['btn_worst', 'btn_worse', 'btn_better', 'btn_best'];
+                    const btn = document.getElementById(btnIds[parseInt(e.key)-1]);
+                    if (btn && btn.offsetParent !== null) {
+                        btn.click();
                     }
                 }
+
+                // Pair Labeling Shortcuts
+                if (e.key.toLowerCase() === 'a') {
+                    const btnLeft = document.getElementById('btn_left');
+                    if (btnLeft && btnLeft.offsetParent !== null) btnLeft.click();
+                }
+                if (e.key.toLowerCase() === 'd') {
+                    const btnRight = document.getElementById('btn_right');
+                    if (btnRight && btnRight.offsetParent !== null) btnRight.click();
+                }
             }
-            // Add event listener
             document.addEventListener('keydown', label_keydown);
-            // Cleanup listener when Gradio block is removed (optional but good practice)
             return () => {
                 document.removeEventListener('keydown', label_keydown);
             }
-        """)
+        """,
+        )
 
     return app
 
@@ -482,16 +732,16 @@ def migrate_json_to_csv(json_path, csv_path):
 
     print(f"Migrating labels from {json_path} to {csv_path}...")
     try:
-        with open(json_path, 'r', encoding='utf-8') as fj:
+        with open(json_path, "r", encoding="utf-8") as fj:
             try:
                 labels_dict = json.load(fj)
             except json.JSONDecodeError as e:
                 print(f"Error reading JSON file: {e}. Migration aborted.")
                 return False
 
-        with open(csv_path, 'w', newline='', encoding='utf-8') as fc:
+        with open(csv_path, "w", newline="", encoding="utf-8") as fc:
             writer = csv.writer(fc)
-            writer.writerow(['image_path', 'label']) # Write header
+            writer.writerow(["image_path", "label"])  # Write header
             count = 0
             for image_path, label in labels_dict.items():
                 writer.writerow([image_path, label])
@@ -505,7 +755,7 @@ def migrate_json_to_csv(json_path, csv_path):
         print(f"An unexpected error occurred during migration: {e}")
         return False
 
-# ADD function to export CSV to JSON
+
 def export_csv_to_json(csv_path, json_path):
     """Exports labels from a CSV file to a JSON file."""
     if not os.path.exists(csv_path):
@@ -515,12 +765,11 @@ def export_csv_to_json(csv_path, json_path):
     print(f"Exporting labels from {csv_path} to {json_path}...")
     labels_dict = {}
     try:
-        with open(csv_path, 'r', newline='', encoding='utf-8') as fc:
+        with open(csv_path, "r", newline="", encoding="utf-8") as fc:
             reader = csv.reader(fc)
-            header = next(reader) # Skip header
-            if header != ['image_path', 'label']:
-                 print(f"Warning: Unexpected CSV header: {header} during export.")
-                 # Continue assuming correct column order
+            header = next(reader)
+            if header != ["image_path", "label"]:
+                print(f"Warning: Unexpected CSV header: {header} during export.")
 
             count = 0
             for row in reader:
@@ -530,23 +779,24 @@ def export_csv_to_json(csv_path, json_path):
                         labels_dict[image_path] = int(label_str)
                         count += 1
                     except ValueError:
-                         print(f"Warning: Invalid label '{label_str}' for "
-                               f"{image_path} found during export. Skipping.")
+                        print(
+                            f"Warning: Invalid label '{label_str}' for "
+                            f"{image_path} found during export. Skipping."
+                        )
                 else:
                     print(f"Warning: Skipping malformed row during export: {row}")
 
-        with open(json_path, 'w', encoding='utf-8') as fj:
+        with open(json_path, "w", encoding="utf-8") as fj:
             json.dump(labels_dict, fj, indent=2)
 
         print(f"Successfully exported {count} labels to {json_path}.")
         return True
     except FileNotFoundError:
-        # This case is handled by the initial check, but included for robustness
         print(f"CSV file not found at {csv_path}. Cannot export.")
         return False
-    except StopIteration: # Handles empty file or only header
+    except StopIteration:
         print("CSV file is empty or contains only header. Exporting empty JSON.")
-        with open(json_path, 'w', encoding='utf-8') as fj:
+        with open(json_path, "w", encoding="utf-8") as fj:
             json.dump({}, fj, indent=2)
         return True
     except IOError as e:
@@ -558,32 +808,44 @@ def export_csv_to_json(csv_path, json_path):
 
 
 if __name__ == "__main__":
-    # Configure these parameters according to your setup
-    IMAGES_FOLDER = "./data/data-0000-cleaned"  # Path to your images folder
-    # Define both potential input/output filenames
-    OLD_JSON_FILE = None #"aesthetic_labels_train.json"
-    OUTPUT_CSV_FILE = "aesthetic_labels_data_0000.csv"
-    
-    # --- Migration Step ---
-    # Check if the old JSON exists and the new CSV doesn't, then migrate.
+    IMAGES_FOLDER = "FOLDER"
+    OLD_JSON_FILE = None  # "aesthetic_labels_train.json"
+    OUTPUT_CSV_FILE = "aesthetic/aesthetic_labels_pairs.csv"
+
+    FINAL_TIERS_CSV = "final_tiers.csv"
+    PRIOR_KNOWLEDGE_CSV = "cleaned_prior_knowledge.csv"
+    PAIRS_OUTPUT_FILE = "aesthetic/labels_pairs.json"
+    CONFIG_PATH = "configs/config.yaml"
+    ARTISTS_COUNT = 32
+
     if OLD_JSON_FILE:
         if os.path.exists(OLD_JSON_FILE) and not os.path.exists(OUTPUT_CSV_FILE):
             migrated = migrate_json_to_csv(OLD_JSON_FILE, OUTPUT_CSV_FILE)
             if migrated:
-                print(f"Optional: You may want to rename or delete the old "
-                    f"JSON file: {OLD_JSON_FILE}")
+                print(
+                    f"Optional: You may want to rename or delete the old "
+                    f"JSON file: {OLD_JSON_FILE}"
+                )
             else:
                 print(f"Migration failed. Please check the files and errors.")
                 exit(1)
 
-    app = create_app(IMAGES_FOLDER, OUTPUT_CSV_FILE)
-    if app: # Check if app creation was successful (images found)
+    app = create_app(
+        IMAGES_FOLDER,
+        OUTPUT_CSV_FILE,
+        FINAL_TIERS_CSV,
+        PRIOR_KNOWLEDGE_CSV,
+        PAIRS_OUTPUT_FILE,
+        CONFIG_PATH,
+    )
+
+    if app:
         print("\n--- Starting Gradio App ---")
         print(f"Images Folder: {IMAGES_FOLDER}")
         print(f"Labels CSV File: {OUTPUT_CSV_FILE}")
         print("Use keys 1 (Worst) to 4 (Best) for faster labeling.")
         print("Close the terminal or press Ctrl+C to stop the app.")
-        
+
         try:
             app.launch(
                 share=False,
@@ -591,23 +853,20 @@ if __name__ == "__main__":
                 inbrowser=True,
                 prevent_thread_lock=True,
                 debug=True,
+                allowed_paths=[IMAGES_FOLDER],
             )
         except KeyboardInterrupt:
             print("\nKeyboardInterrupt received. Shutting down the app...")
-        # ADD finally block for guaranteed execution
         finally:
             print("\nApp closed.")
-            # --- Export to JSON after app closes ---
-            final_json_path = Path(OUTPUT_CSV_FILE).with_suffix('.final.json')
-            
-            # Check if the CSV file actually exists before attempting export
+            final_json_path = Path(OUTPUT_CSV_FILE).with_suffix(".final.json")
+
             if not os.path.exists(OUTPUT_CSV_FILE):
-                 print(f"CSV file {OUTPUT_CSV_FILE} not found. "
-                       "Skipping final JSON export.")
+                print(
+                    f"CSV file {OUTPUT_CSV_FILE} not found. Skipping final JSON export."
+                )
             else:
-                # You might want to call this manually or based on a condition
-                # after labeling is complete.
-                final_json_path = Path(OUTPUT_CSV_FILE).with_suffix('.final.json')
+                final_json_path = Path(OUTPUT_CSV_FILE).with_suffix(".final.json")
                 print(f"\nLabeling finished or app closed.")
                 export_csv_to_json(OUTPUT_CSV_FILE, str(final_json_path))
 
