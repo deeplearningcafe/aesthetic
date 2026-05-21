@@ -4,3 +4,6 @@ latents/
 *.csv
 *.json
 filtering.py
+*.png
+models/
+*.egg-info/
