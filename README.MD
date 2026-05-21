@@ -103,20 +103,16 @@ The interface exposes four specialized operational modules:
 ### Step 3: Feature Caching
 
 To avoid loading the Vision Transformer repeatedly, pre-extract and cache the
-SwinV2 embeddings ($1024$-dimensional vectors) directly to HDF5 shards:
+SwinV2 embeddings ($1024$-dimensional vectors) directly to HDF5 shards.
+This is done in when running the labeling gradio UI in the cache tab.
+The necessary arguments can should be written in the respective text box.
 
 ```bash
-python -c '
-from aesthetic.training.cache import FeatureCacher
-cacher = FeatureCacher(model_dir="model/wd_swinv2")
-cacher.cache_dataset(
-    json_path="aesthetic/labels_pairs.json",
-    output_h5="aesthetic_output/cached_features.h5",
-    output_meta="aesthetic_output/cached_meta.json",
-    global_path="//Data/evangelion",
-    batch_size=32
-)
-'
+model_dir="model/wd_swinv2"
+json_path="aesthetic/labels_pairs.json",
+output_h5="aesthetic_output/cached_features.h5",
+output_meta="aesthetic_output/cached_meta.json",
+batch_size=32
 ```
 
 ---
