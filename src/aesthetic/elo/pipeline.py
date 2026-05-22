@@ -3,6 +3,7 @@ import torch
 import h5py
 import pandas as pd
 import matplotlib.pyplot as plt
+from typing import Optional
 from aesthetic.training.cache import FeatureCacher
 from aesthetic.training.models.pair_cls import PairClassifier
 
@@ -135,26 +136,40 @@ class DatasetSelector:
     def select(
         self,
         elo_json: str,
-        threshold: float,
         out_csv: str,
+        threshold: Optional[float] = None,
+        num_samples: Optional[int] = None,
         plot_path: str = "elo_dist.png",
     ) -> None:
+        """Selects top images either by ELO threshold or target sample count."""
+        if threshold is None and num_samples is None:
+            raise ValueError("Must provide either 'threshold' or 'num_samples'.")
+
         with open(elo_json, "r") as f:
             elos = json.load(f)
 
         df = pd.DataFrame(list(elos.items()), columns=["image_path", "elo"])
 
-        # Debugging plot
+        df = df.sort_values("elo", ascending=False).reset_index(drop=True)
+
+        if threshold is not None:
+            selected = df[df["elo"] >= threshold]
+            cutoff = threshold
+            msg = f"images above threshold {threshold}"
+        else:
+            selected = df.head(num_samples)
+            cutoff = selected["elo"].min() if not selected.empty else 1200.0
+            msg = f"top {num_samples} images (lowest ELO: {cutoff:.1f})"
+
         plt.figure(figsize=(10, 6))
         plt.hist(df["elo"], bins=50, color="skyblue", edgecolor="black")
-        plt.axvline(threshold, color="red", linestyle="dashed", linewidth=2)
+        plt.axvline(cutoff, color="red", linestyle="dashed", linewidth=2)
         plt.title("ELO Score Distribution")
         plt.xlabel("ELO Score")
         plt.ylabel("Frequency")
         plt.savefig(plot_path)
         plt.close()
 
-        selected = df[df["elo"] >= threshold]
         selected.to_csv(out_csv, index=False)
-        print(f"Dataset generated: {len(selected)} images above {threshold}.")
+        print(f"Dataset generated: {len(selected)} {msg}.")
         print(f"Distribution plot saved to {plot_path}")

@@ -36,9 +36,14 @@ def main():
     )
     parser.add_argument("--elo_json", type=str, default="elos.json")
     parser.add_argument(
+        "--num_samples",
+        type=int,
+        default=2000,
+        help="Number of samples to be included in final dataset",
+    )
+    parser.add_argument(
         "--threshold",
         type=float,
-        default=1600.0,
         help="Minimum ELO score to be included in final dataset",
     )
     parser.add_argument("--out_csv", type=str, default="hq_dataset.csv")
@@ -75,7 +80,7 @@ def main():
     if 4 in args.phases:
         print("\n--- Phase 4: Binning and Dataset Selection ---")
         ds = DatasetSelector()
-        ds.select(args.elo_json, args.threshold, args.out_csv)
+        ds.select(args.elo_json, args.out_csv, args.threshold, args.num_samples)
 
     if 5 in args.phases:
         print("\n--- Phase 5: Debugging Dataset ---")
